@@ -18,6 +18,22 @@ The Rust ports are structured so that simulation logic and UI rendering are sepa
 - the UI reads snapshots of that state and renders them
 - worker threads do not draw directly
 
+## Author
+
+Prof. Dr. Teddy Surya Gunawan  
+Electrical and Computer Engineering Department  
+International Islamic University Malaysia  
+tsgunawan@iium.edu.my
+
+## Course Context
+
+This repository is prepared for Operating Systems class use.
+
+## Acknowledgements
+
+This project is a Rust port of the TSGL concurrency visualizations.  
+Special thanks to the original authors of TSGL for their work and the original teaching visualizations.
+
 ## Requirements
 
 - Rust toolchain
