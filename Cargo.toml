@@ -1,0 +1,25 @@
+[package]
+name = "TSGL_rust"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "reader_writer"
+path = "src/reader_writer/main.rs"
+
+[[bin]]
+name = "producer_consumer"
+path = "src/producer_consumer/main.rs"
+
+[[bin]]
+name = "dining_philosophers"
+path = "src/dining_philosophers/main.rs"
+
+[dependencies]
+# For visualization (equivalent to TSGL Canvas)
+eframe = "0.27"        # egui framework
+egui = "0.27"
+
+# For concurrency (most is std, but these help)
+parking_lot = "0.12"   # faster Mutex/RwLock than std
+crossbeam = "0.8"      # channels, better than std::sync::mpsc
