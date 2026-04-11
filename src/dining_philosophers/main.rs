@@ -21,6 +21,16 @@ const PHIL_RADIUS: f32 = 32.0;
 const LEGEND_X: f32 = 845.0;
 const LEGEND_Y: f32 = 110.0;
 
+// ── Light academic theme ──────────────────────────────────────────────────────
+const C_BG: Color32 = Color32::WHITE;
+const C_PANEL: Color32 = Color32::from_rgb(248, 249, 250);
+const C_BORDER: Color32 = Color32::from_rgb(222, 226, 230);
+const C_TEAL: Color32 = Color32::from_rgb(37, 99, 235);    // active / blue
+const C_AMBER: Color32 = Color32::from_rgb(234, 88, 12);   // waiting / orange
+const C_GREEN: Color32 = Color32::from_rgb(22, 163, 74);   // eating / green
+const C_TEXT: Color32 = Color32::from_rgb(17, 24, 39);     // near-black
+const C_TEXT_DIM: Color32 = Color32::from_rgb(75, 85, 99); // secondary
+
 fn main() -> eframe::Result<()> {
     let config = DiningConfig::from_args();
     let title = format!(
@@ -482,15 +492,20 @@ struct DiningApp {
     config: DiningConfig,
     shared: Arc<RwLock<AppState>>,
     runtime: Option<Runtime>,
+    screenshot_counter: u32,
+    pending_screenshot: bool,
 }
 
 impl DiningApp {
-    fn new(_cc: &CreationContext<'_>, config: DiningConfig) -> Self {
+    fn new(cc: &CreationContext<'_>, config: DiningConfig) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::light());
         let (shared, runtime) = Self::build_runtime(&config);
         Self {
             config,
             shared,
             runtime: Some(runtime),
+            screenshot_counter: 0,
+            pending_screenshot: false,
         }
     }
 
@@ -513,23 +528,36 @@ impl DiningApp {
         let painter = ui.painter();
         let app = self.shared.read();
 
-        painter.rect_filled(ui.max_rect(), 0.0, Color32::from_rgb(248, 248, 246));
+        painter.rect_filled(ui.max_rect(), 0.0, C_BG);
 
+        // Table surface — warm light fill for print-friendly theme
+        // Outer ring track (where forks rest)
+        painter.circle_filled(
+            Pos2::new(TABLE_CENTER_X, TABLE_CENTER_Y),
+            TABLE_RADIUS + 4.0,
+            Color32::from_rgb(230, 231, 235),
+        );
+        painter.circle_stroke(
+            Pos2::new(TABLE_CENTER_X, TABLE_CENTER_Y),
+            TABLE_RADIUS + 4.0,
+            Stroke::new(1.0, C_BORDER),
+        );
+        // Table top
         painter.circle_filled(
             Pos2::new(TABLE_CENTER_X, TABLE_CENTER_Y),
             TABLE_RADIUS - 48.0,
-            Color32::from_rgb(80, 80, 80),
+            Color32::from_rgb(248, 246, 242),
         );
         painter.circle_stroke(
             Pos2::new(TABLE_CENTER_X, TABLE_CENTER_Y),
             TABLE_RADIUS - 48.0,
-            Stroke::new(2.0, Color32::BLACK),
+            Stroke::new(1.5, C_BORDER),
         );
 
         for phil in &app.philosophers {
             let pos = philosopher_position(phil.id, app.count);
             painter.circle_filled(pos, PHIL_RADIUS, phil_color(phil.state));
-            painter.circle_stroke(pos, PHIL_RADIUS, Stroke::new(2.0, Color32::BLACK));
+            painter.circle_stroke(pos, PHIL_RADIUS, Stroke::new(2.0, C_BORDER));
             painter.text(
                 pos,
                 Align2::CENTER_CENTER,
@@ -537,12 +565,18 @@ impl DiningApp {
                 FontId::proportional(18.0),
                 Color32::WHITE,
             );
+            let label_color = match phil.state {
+                PhilState::HasNone => C_AMBER,
+                PhilState::HasBoth => C_GREEN,
+                PhilState::IsFull | PhilState::Thinking => C_TEXT_DIM,
+                _ => C_TEXT,
+            };
             painter.text(
                 pos + Vec2::new(0.0, 44.0),
                 Align2::CENTER_CENTER,
                 state_label(phil.state),
-                FontId::proportional(14.0),
-                Color32::from_rgb(55, 55, 55),
+                FontId::proportional(13.0),
+                label_color,
             );
             draw_meals(painter, phil.id, app.count, phil.meals);
         }
@@ -553,14 +587,59 @@ impl DiningApp {
         }
 
         draw_legend(painter, &self.config, app.counter);
+
+        // Screenshot overlay — shown while paused
+        let is_paused = self.runtime.as_ref().map(|r| r.is_paused()).unwrap_or(false);
+        if is_paused && !self.config.step_mode {
+            let banner_rect = Rect::from_center_size(
+                Pos2::new(TABLE_CENTER_X, 62.0),
+                Vec2::new(340.0, 24.0),
+            );
+            painter.rect_filled(banner_rect, 6.0, Color32::from_rgb(37, 99, 235));
+            painter.text(
+                banner_rect.center(),
+                Align2::CENTER_CENTER,
+                "Paused — screenshot ready   (Space to resume)",
+                FontId::proportional(12.0),
+                Color32::WHITE,
+            );
+        }
     }
 }
 
 impl App for DiningApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(Duration::from_millis(16));
+        ctx.request_repaint_after(Duration::from_millis(33));
         let mut should_reset = false;
         let space_pressed = ctx.input(|input| input.key_pressed(egui::Key::Space));
+        let s_pressed    = ctx.input(|input| input.key_pressed(egui::Key::S));
+
+        // Receive screenshot from previous frame's request
+        let screenshot_image = ctx.input(|i| {
+            i.events.iter().find_map(|e| {
+                if let egui::Event::Screenshot { image, .. } = e {
+                    Some(std::sync::Arc::clone(image))
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(image) = screenshot_image {
+            if self.pending_screenshot {
+                self.pending_screenshot = false;
+                self.screenshot_counter += 1;
+                let path = format!("dining_philosophers{:02}.png", self.screenshot_counter);
+                save_screenshot(&image, &path);
+            }
+        }
+
+        if s_pressed && !self.config.step_mode {
+            if let Some(runtime) = self.runtime.as_ref() {
+                runtime.set_paused(true);
+            }
+            self.pending_screenshot = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        }
 
         if space_pressed && let Some(runtime) = self.runtime.as_ref() {
             if self.config.step_mode {
@@ -573,6 +652,8 @@ impl App for DiningApp {
 
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.heading("Dining Philosophers");
+                ui.separator();
                 if let Some(runtime) = self.runtime.as_ref() {
                     if self.config.step_mode {
                         if ui.button("Step").clicked() {
@@ -590,8 +671,8 @@ impl App for DiningApp {
                     should_reset = true;
                 }
                 ui.separator();
-                ui.label(format!(
-                    "{} philosophers, {}, {}",
+                ui.label(egui::RichText::new(format!(
+                    "{} philosophers  \u{00b7}  {}  \u{00b7}  {}",
                     self.config.count,
                     if self.config.step_mode {
                         "step-through".to_owned()
@@ -599,12 +680,13 @@ impl App for DiningApp {
                         format!("speed {}", self.config.speed)
                     },
                     self.config.method.label()
-                ));
-                ui.separator();
-                ui.label(if self.config.step_mode {
-                    "Space: step"
-                } else {
-                    "Space: pause/resume"
+                )).color(C_TEXT_DIM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new(if self.config.step_mode {
+                        "Space: step"
+                    } else {
+                        "S: screenshot  \u{00b7}  Space: pause/resume"
+                    }).color(C_TEXT_DIM));
                 });
             });
         });
@@ -819,13 +901,13 @@ fn fork_visual(app: &AppState, fork_id: usize) -> (Pos2, f32, Color32) {
     let close = 0.175_f32;
     let mut radius = FORK_HELD_RADIUS;
     let mut angle = (fork_id as f32 + 0.5) * arc;
-    let mut color = Color32::BLACK;
+    let mut color = Color32::from_rgb(180, 180, 200);
 
     match app.forks[fork_id].user {
         Some(owner) if owner == fork_id => {
             angle = fork_id as f32 * arc + close;
             color = if app.philosophers[owner].state == PhilState::HasBoth {
-                Color32::GREEN
+                C_GREEN
             } else {
                 Color32::from_rgb(150, 80, 200)
             };
@@ -833,7 +915,7 @@ fn fork_visual(app: &AppState, fork_id: usize) -> (Pos2, f32, Color32) {
         Some(owner) if owner == (fork_id + 1) % app.count => {
             angle = ((fork_id + 1) as f32) * arc - close;
             color = if app.philosophers[owner].state == PhilState::HasBoth {
-                Color32::GREEN
+                C_GREEN
             } else {
                 Color32::from_rgb(235, 155, 45)
             };
@@ -859,7 +941,7 @@ fn draw_fork(painter: &egui::Painter, center: Pos2, angle: f32, color: Color32) 
     painter.add(Shape::convex_polygon(
         rotated,
         color,
-        Stroke::new(1.5, Color32::BLACK),
+        Stroke::new(1.0, C_BORDER),
     ));
 }
 
@@ -913,8 +995,8 @@ fn draw_meals(painter: &egui::Painter, id: usize, count: usize, meals: usize) {
             TABLE_CENTER_X + dist * angle.cos(),
             TABLE_CENTER_Y + dist * angle.sin(),
         );
-        painter.circle_filled(pos, 5.0, Color32::from_rgb(140, 90, 35));
-        painter.circle_stroke(pos, 5.0, Stroke::new(1.0, Color32::from_rgb(90, 60, 20)));
+        painter.circle_filled(pos, 5.0, Color32::from_rgb(180, 130, 60));
+        painter.circle_stroke(pos, 5.0, Stroke::new(0.5, Color32::from_rgb(140, 100, 40)));
     }
 
     let rendered_capacity = (((TAU / count as f32) * TABLE_RADIUS) / TAU).floor() as usize * 10;
@@ -925,89 +1007,84 @@ fn draw_meals(painter: &egui::Painter, id: usize, count: usize, meals: usize) {
             Align2::CENTER_CENTER,
             format!("x{}", meals),
             FontId::proportional(14.0),
-            Color32::from_rgb(90, 60, 20),
+            C_TEXT_DIM,
         );
     }
 }
 
 fn draw_legend(painter: &egui::Painter, config: &DiningConfig, counter: usize) {
     let panel = Rect::from_min_size(Pos2::new(LEGEND_X, LEGEND_Y), Vec2::new(245.0, 560.0));
-    painter.rect_filled(panel, 10.0, Color32::from_rgb(244, 244, 242));
-    painter.rect_stroke(panel, 10.0, Stroke::new(1.5, Color32::from_gray(90)));
+    painter.rect_filled(panel, 10.0, C_PANEL);
+    painter.rect_stroke(panel, 10.0, Stroke::new(1.0, C_BORDER));
 
     let legend_x = LEGEND_X + 18.0;
-    let mut y = LEGEND_Y + 28.0;
+    let mut y = LEGEND_Y + 26.0;
     painter.text(
         Pos2::new(legend_x, y),
         Align2::LEFT_CENTER,
-        "Method:",
-        FontId::proportional(24.0),
-        Color32::BLACK,
+        "Method",
+        FontId::proportional(18.0),
+        C_TEXT_DIM,
     );
-    y += 32.0;
+    y += 24.0;
     painter.text(
-        Pos2::new(legend_x + 16.0, y),
+        Pos2::new(legend_x + 10.0, y),
         Align2::LEFT_CENTER,
         config.method.label(),
-        FontId::proportional(22.0),
-        Color32::BLACK,
+        FontId::proportional(14.0),
+        C_TEAL,
     );
-    y += 42.0;
+    y += 34.0;
     painter.text(
         Pos2::new(legend_x, y),
         Align2::LEFT_CENTER,
-        "Meals:",
-        FontId::proportional(24.0),
-        Color32::BLACK,
+        "Meals",
+        FontId::proportional(18.0),
+        C_TEXT_DIM,
     );
     painter.circle_filled(
-        Pos2::new(legend_x + 52.0, y + 24.0),
+        Pos2::new(legend_x + 44.0, y + 20.0),
         5.0,
-        Color32::from_rgb(140, 90, 35),
-    );
-    painter.circle_stroke(
-        Pos2::new(legend_x + 52.0, y + 24.0),
-        5.0,
-        Stroke::new(1.0, Color32::from_rgb(90, 60, 20)),
+        Color32::from_rgb(180, 130, 60),
     );
     painter.text(
-        Pos2::new(legend_x + 70.0, y + 24.0),
+        Pos2::new(legend_x + 58.0, y + 20.0),
         Align2::LEFT_CENTER,
         "= one meal",
-        FontId::proportional(20.0),
-        Color32::BLACK,
+        FontId::proportional(12.0),
+        C_TEXT_DIM,
     );
-    y += 70.0;
+    y += 52.0;
     painter.text(
         Pos2::new(legend_x, y),
         Align2::LEFT_CENTER,
-        "Philosophers:",
-        FontId::proportional(24.0),
-        Color32::BLACK,
+        "Philosophers",
+        FontId::proportional(18.0),
+        C_TEXT_DIM,
     );
-    y += 36.0;
+    y += 26.0;
 
     for (label, color) in [
-        ("Thinking", Color32::BLUE),
+        ("Thinking", Color32::from_rgb(60, 100, 200)),
         ("With Right Fork", Color32::from_rgb(235, 155, 45)),
         ("With Left Fork", Color32::from_rgb(150, 80, 200)),
-        ("Eating", Color32::GREEN),
-        ("Hungry", Color32::RED),
+        ("Eating", C_GREEN),
+        ("Hungry", Color32::from_rgb(220, 50, 50)),
     ] {
-        painter.circle_filled(Pos2::new(legend_x + 22.0, y), 20.0, color);
+        painter.circle_filled(Pos2::new(legend_x + 14.0, y), 13.0, color);
         painter.circle_stroke(
-            Pos2::new(legend_x + 22.0, y),
-            20.0,
-            Stroke::new(1.5, Color32::BLACK),
+            Pos2::new(legend_x + 14.0, y),
+            13.0,
+            Stroke::new(1.0, C_BORDER),
         );
         painter.text(
-            Pos2::new(legend_x + 58.0, y),
+            Pos2::new(legend_x + 36.0, y),
             Align2::LEFT_CENTER,
             label,
-            FontId::proportional(18.0),
-            Color32::BLACK,
+            FontId::proportional(13.0),
+            C_TEXT,
         );
-        y += 58.0;
+        y += 40.0;
     }
 
     y += 10.0;
@@ -1019,26 +1096,26 @@ fn draw_legend(painter: &egui::Painter, config: &DiningConfig, counter: usize) {
         } else {
             format!("Mode: speed {}", config.speed)
         },
-        FontId::proportional(18.0),
-        Color32::from_rgb(45, 45, 45),
+        FontId::proportional(13.0),
+        C_TEXT_DIM,
     );
-    y += 28.0;
+    y += 20.0;
     painter.text(
         Pos2::new(legend_x, y),
         Align2::LEFT_CENTER,
-        format!("Counter: {}", counter),
-        FontId::proportional(18.0),
-        Color32::BLACK,
+        format!("Counter: {counter}"),
+        FontId::monospace(12.0),
+        C_TEXT,
     );
 }
 
 fn phil_color(state: PhilState) -> Color32 {
     match state {
-        PhilState::HasNone => Color32::RED,
+        PhilState::HasNone => Color32::from_rgb(220, 50, 50),
         PhilState::HasRight => Color32::from_rgb(235, 155, 45),
         PhilState::HasLeft => Color32::from_rgb(150, 80, 200),
-        PhilState::HasBoth => Color32::GREEN,
-        PhilState::IsFull | PhilState::Thinking => Color32::BLUE,
+        PhilState::HasBoth => C_GREEN,
+        PhilState::IsFull | PhilState::Thinking => Color32::from_rgb(60, 100, 200),
     }
 }
 
@@ -1050,5 +1127,27 @@ fn state_label(state: PhilState) -> &'static str {
         PhilState::HasBoth => "Eating",
         PhilState::IsFull => "Full",
         PhilState::Thinking => "Thinking",
+    }
+}
+
+fn save_screenshot(image: &egui::ColorImage, path: &str) {
+    let [width, height] = image.size;
+    let pixels: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+    let file = match std::fs::File::create(path) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("Screenshot: could not create '{path}': {e}"); return; }
+    };
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    match encoder.write_header() {
+        Ok(mut writer) => {
+            if let Err(e) = writer.write_image_data(&pixels) {
+                eprintln!("Screenshot: write failed for '{path}': {e}");
+            } else {
+                println!("Screenshot saved: {path}");
+            }
+        }
+        Err(e) => eprintln!("Screenshot: PNG header error for '{path}': {e}"),
     }
 }
