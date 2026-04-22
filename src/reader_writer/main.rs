@@ -28,6 +28,18 @@ const THREAD_Y_STEP: f32 = 54.0;
 const MOVE_DURATION_MS: u64 = 220;
 const START_STAGGER_MS: u64 = 90;
 
+// ── Light academic theme ──────────────────────────────────────────────────────
+const C_BG: Color32 = Color32::WHITE;
+const C_PANEL: Color32 = Color32::from_rgb(248, 249, 250);
+const C_BORDER: Color32 = Color32::from_rgb(222, 226, 230);
+const C_TEAL: Color32 = Color32::from_rgb(37, 99, 235);    // active / blue
+const C_AMBER: Color32 = Color32::from_rgb(234, 88, 12);   // waiting / orange
+const C_GREEN: Color32 = Color32::from_rgb(22, 163, 74);   // reading / green
+const C_RED: Color32 = Color32::from_rgb(220, 38, 38);     // writing / red
+const C_GREEN_DIM: Color32 = Color32::from_rgb(220, 252, 231); // light green badge bg
+const C_TEXT: Color32 = Color32::from_rgb(17, 24, 39);     // near-black
+const C_TEXT_DIM: Color32 = Color32::from_rgb(75, 85, 99); // secondary
+
 fn main() -> eframe::Result<()> {
     let config = ReaderWriterConfig::from_args();
     let title = format!(
@@ -357,15 +369,20 @@ struct ReaderWriterApp {
     config: ReaderWriterConfig,
     shared: Arc<RwLock<AppState>>,
     runtime: Option<WorkerRuntime>,
+    screenshot_counter: u32,
+    pending_screenshot: bool,
 }
 
 impl ReaderWriterApp {
-    fn new(_cc: &CreationContext<'_>, config: ReaderWriterConfig) -> Self {
+    fn new(cc: &CreationContext<'_>, config: ReaderWriterConfig) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::light());
         let (shared, runtime) = Self::build_runtime(&config);
         Self {
             config,
             shared,
             runtime: Some(runtime),
+            screenshot_counter: 0,
+            pending_screenshot: false,
         }
     }
 
@@ -393,188 +410,230 @@ impl ReaderWriterApp {
         let now = Instant::now();
         let painter = ui.painter();
         let app = self.shared.read();
+        let coord = &app.coordinator;
 
-        painter.rect_filled(ui.max_rect(), 0.0, Color32::from_rgb(248, 248, 245));
+        painter.rect_filled(ui.max_rect(), 0.0, C_BG);
 
         let grid_rect = data_grid_rect();
         let margin_rect = grid_rect.expand2(Vec2::new(52.0, 0.0));
-        painter.rect_filled(margin_rect, 8.0, Color32::from_rgb(232, 232, 228));
-        painter.rect_filled(grid_rect, 8.0, Color32::from_rgb(214, 214, 214));
-        painter.rect_stroke(grid_rect, 8.0, Stroke::new(1.5, Color32::BLACK));
 
+        // ── Database rectangle ────────────────────────────────────────────────
+        painter.rect_filled(margin_rect, 8.0, C_PANEL);
+        painter.rect_stroke(margin_rect, 8.0, Stroke::new(1.0, C_BORDER));
+        painter.rect_filled(grid_rect, 4.0, Color32::from_rgb(237, 238, 242));
+        painter.rect_stroke(grid_rect, 4.0, Stroke::new(1.0, C_BORDER));
+
+        // Flat red border while a writer holds the lock (no pulse — print-safe)
+        if coord.active_writers > 0 {
+            painter.rect_stroke(margin_rect.expand(3.0), 10.0, Stroke::new(3.0, C_RED));
+        }
+
+        // Policy / store label
         painter.text(
-            Pos2::new(WINDOW_SIZE[0] * 0.5, 92.0),
+            Pos2::new(WINDOW_SIZE[0] * 0.5, 88.0),
             Align2::CENTER_CENTER,
             app.policy.label(),
-            FontId::proportional(30.0),
-            Color32::BLACK,
+            FontId::proportional(18.0),
+            C_TEAL,
         );
         painter.text(
-            Pos2::new(WINDOW_SIZE[0] * 0.5, 122.0),
+            Pos2::new(WINDOW_SIZE[0] * 0.5, 112.0),
             Align2::CENTER_CENTER,
             format!("Shared Data Store  {}/{}", app.cells.len(), app.max_cells),
-            FontId::proportional(20.0),
-            Color32::from_rgb(55, 55, 55),
+            FontId::proportional(14.0),
+            C_TEXT_DIM,
         );
 
+        // ── Reader count badge ────────────────────────────────────────────────
+        let n_readers = coord.active_readers;
+        let badge_center = Pos2::new(WINDOW_SIZE[0] * 0.5, DATA_TOP - 18.0);
+        let badge_rect = Rect::from_center_size(badge_center, Vec2::new(160.0, 20.0));
+        let (badge_fill, badge_stroke_col, badge_text_col) = if n_readers > 0 {
+            (C_GREEN_DIM, C_GREEN, C_GREEN)
+        } else {
+            (C_PANEL, C_BORDER, C_TEXT_DIM)
+        };
+        painter.rect_filled(badge_rect, 10.0, badge_fill);
+        painter.rect_stroke(badge_rect, 10.0, Stroke::new(1.0, badge_stroke_col));
+        painter.text(
+            badge_center,
+            Align2::CENTER_CENTER,
+            format!("{} reader{} active", n_readers, if n_readers == 1 { "" } else { "s" }),
+            FontId::proportional(12.0),
+            badge_text_col,
+        );
+
+        // Zone dividers
         painter.line_segment(
             [Pos2::new(325.0, DATA_TOP), Pos2::new(325.0, DATA_TOP + grid_rect.height())],
-            Stroke::new(1.0, Color32::BLACK),
+            Stroke::new(1.0, C_BORDER),
         );
         painter.line_segment(
             [Pos2::new(655.0, DATA_TOP), Pos2::new(655.0, DATA_TOP + grid_rect.height())],
-            Stroke::new(1.0, Color32::BLACK),
+            Stroke::new(1.0, C_BORDER),
         );
 
-        painter.text(
-            Pos2::new(120.0, 130.0),
-            Align2::CENTER_CENTER,
-            "Writers",
-            FontId::proportional(26.0),
-            Color32::BLACK,
-        );
-        painter.text(
-            Pos2::new(860.0, 130.0),
-            Align2::CENTER_CENTER,
-            "Readers",
-            FontId::proportional(26.0),
-            Color32::BLACK,
-        );
-        painter.text(
-            Pos2::new(235.0, 125.0),
-            Align2::CENTER_CENTER,
-            "Waiting",
-            FontId::proportional(18.0),
-            Color32::from_gray(120),
-        );
-        painter.text(
-            Pos2::new(760.0, 125.0),
-            Align2::CENTER_CENTER,
-            "Waiting",
-            FontId::proportional(18.0),
-            Color32::from_gray(120),
-        );
+        // Column headers — color-coded by thread type
+        painter.text(Pos2::new(120.0, 130.0), Align2::CENTER_CENTER,
+            "Writers", FontId::proportional(18.0), C_AMBER);
+        painter.text(Pos2::new(860.0, 130.0), Align2::CENTER_CENTER,
+            "Readers", FontId::proportional(18.0), C_GREEN);
+        painter.text(Pos2::new(235.0, 125.0), Align2::CENTER_CENTER,
+            "Waiting", FontId::proportional(13.0), C_TEXT_DIM);
+        painter.text(Pos2::new(760.0, 125.0), Align2::CENTER_CENTER,
+            "Waiting", FontId::proportional(13.0), C_TEXT_DIM);
 
+        // Data cells
         for idx in 0..app.max_cells {
             let rect = cell_rect(idx);
             let cell = app.cells.get(idx);
-            let fill = cell.map(|c| c.color).unwrap_or(Color32::from_rgb(240, 240, 240));
+            let fill = cell.map(|c| c.color).unwrap_or(Color32::from_rgb(218, 220, 228));
             painter.rect_filled(rect, 2.0, fill);
-            painter.rect_stroke(rect, 2.0, Stroke::new(1.0, Color32::from_gray(110)));
+            painter.rect_stroke(rect, 2.0, Stroke::new(0.5, C_BORDER));
         }
 
+        // Thread → cell access arrows (color by kind)
         for thread in &app.threads {
             let pos = thread.current_position(now);
             if let Some(target) = thread.target_cell {
                 let target_center = cell_center(target);
-                let arrow_color = match thread.kind {
-                    ThreadKind::Reader => Color32::from_rgb(50, 50, 50),
-                    ThreadKind::Writer => Color32::from_rgb(30, 30, 30),
+                let arrow_col = match thread.kind {
+                    ThreadKind::Reader => C_GREEN.gamma_multiply(0.45),
+                    ThreadKind::Writer => C_RED.gamma_multiply(0.45),
                 };
-                painter.line_segment([pos, target_center], Stroke::new(1.5, arrow_color));
+                painter.line_segment([pos, target_center], Stroke::new(1.0, arrow_col));
             }
         }
 
+        // ── Thread circles ────────────────────────────────────────────────────
         for thread in &app.threads {
             let pos = thread.current_position(now);
-            let state_color = match thread.status {
-                ThreadStatus::Thinking => thread.color.gamma_multiply(0.88),
-                ThreadStatus::Waiting => Color32::from_rgb(30, 30, 30),
-                ThreadStatus::Reading | ThreadStatus::Writing => thread.color,
-                ThreadStatus::Stopped => Color32::from_rgb(80, 80, 80),
+            let (fill, stroke_col) = match thread.status {
+                ThreadStatus::Thinking => (thread.color.gamma_multiply(0.75), C_BORDER),
+                ThreadStatus::Waiting  => (C_AMBER, C_AMBER),
+                ThreadStatus::Reading  => (C_GREEN, C_GREEN),
+                ThreadStatus::Writing  => (C_RED, C_RED),
+                ThreadStatus::Stopped  => (Color32::from_rgb(107, 114, 128), C_BORDER),
             };
 
-            match thread.kind {
-                ThreadKind::Writer => {
-                    painter.circle_filled(pos, 14.0, state_color);
-                    painter.circle_stroke(pos, 14.0, Stroke::new(2.0, Color32::BLACK));
-                }
-                ThreadKind::Reader => {
-                    painter.circle_filled(pos, 14.0, state_color);
-                    painter.circle_stroke(pos, 14.0, Stroke::new(2.0, Color32::BLACK));
-                }
-            }
-
+            painter.circle_filled(pos, 14.0, fill);
+            painter.circle_stroke(pos, 14.0, Stroke::new(2.0, stroke_col));
             painter.text(
                 pos + Vec2::new(0.0, 0.5),
                 Align2::CENTER_CENTER,
                 thread.count.to_string(),
-                FontId::proportional(15.0),
+                FontId::monospace(12.0),
                 Color32::WHITE,
             );
 
             let label_pos = match thread.kind {
-                ThreadKind::Writer => pos + Vec2::new(-70.0, 0.0),
-                ThreadKind::Reader => pos + Vec2::new(70.0, 0.0),
+                ThreadKind::Writer => pos + Vec2::new(-66.0, 0.0),
+                ThreadKind::Reader => pos + Vec2::new(66.0, 0.0),
+            };
+            painter.text(label_pos, Align2::CENTER_CENTER,
+                format!("{} {}", thread.kind.label(), thread.id + 1),
+                FontId::proportional(13.0), C_TEXT);
+
+            let state_color = match thread.status {
+                ThreadStatus::Waiting => C_AMBER,
+                ThreadStatus::Reading => C_GREEN,
+                ThreadStatus::Writing => C_RED,
+                _ => C_TEXT_DIM,
             };
             painter.text(
-                label_pos,
-                Align2::CENTER_CENTER,
-                format!("{} {}", thread.kind.label(), thread.id + 1),
-                FontId::proportional(15.0),
-                Color32::BLACK,
-            );
-
-            let state_pos = pos + Vec2::new(0.0, 24.0);
-            painter.text(
-                state_pos,
+                pos + Vec2::new(0.0, 24.0),
                 Align2::CENTER_CENTER,
                 thread.status.label(),
-                FontId::proportional(13.0),
-                Color32::from_rgb(65, 65, 65),
+                FontId::proportional(12.0),
+                state_color,
             );
         }
 
-        let footer = format!(
-            "Cells: {}   Active readers: {}   Active writers: {}   Waiting readers: {}   Waiting writers: {}",
-            app.coordinator.data_count,
-            app.coordinator.active_readers,
-            app.coordinator.active_writers,
-            app.coordinator.waiting_readers,
-            app.coordinator.waiting_writers
+        // ── Stats panel ───────────────────────────────────────────────────────
+        let stats_y = WINDOW_SIZE[1] - 76.0;
+        let stats_rect = Rect::from_min_size(
+            Pos2::new(16.0, stats_y - 14.0),
+            Vec2::new(WINDOW_SIZE[0] - 32.0, 30.0),
         );
+        painter.rect_filled(stats_rect, 6.0, C_PANEL);
+        painter.rect_stroke(stats_rect, 6.0, Stroke::new(1.0, C_BORDER));
         painter.text(
-            Pos2::new(WINDOW_SIZE[0] * 0.5, WINDOW_SIZE[1] - 38.0),
+            Pos2::new(WINDOW_SIZE[0] * 0.5, stats_y + 1.0),
             Align2::CENTER_CENTER,
-            footer,
-            FontId::proportional(18.0),
-            Color32::from_rgb(40, 40, 40),
+            format!(
+                "Cells: {}    Active R: {}   Active W: {}    Waiting R: {}   Waiting W: {}",
+                coord.data_count, coord.active_readers, coord.active_writers,
+                coord.waiting_readers, coord.waiting_writers
+            ),
+            FontId::monospace(12.0),
+            C_TEXT,
         );
 
-        let legend_top = WINDOW_SIZE[1] - 110.0;
-        painter.text(
-            Pos2::new(WINDOW_SIZE[0] * 0.5, legend_top - 26.0),
-            Align2::CENTER_CENTER,
-            "Legend",
-            FontId::proportional(18.0),
-            Color32::from_rgb(45, 45, 45),
+        // ── Legend ────────────────────────────────────────────────────────────
+        let legend_y = WINDOW_SIZE[1] - 34.0;
+        let legend_rect = Rect::from_min_size(
+            Pos2::new(WINDOW_SIZE[0] * 0.5 - 310.0, legend_y - 12.0),
+            Vec2::new(620.0, 22.0),
         );
-        draw_legend(
-            painter,
-            Pos2::new(WINDOW_SIZE[0] * 0.5 - 190.0, legend_top),
-            "Waiting",
-            Color32::from_rgb(30, 30, 30),
-        );
-        draw_legend(
-            painter,
-            Pos2::new(WINDOW_SIZE[0] * 0.5, legend_top),
-            "Reading / Writing",
-            Color32::from_rgb(60, 150, 90),
-        );
-        draw_legend(
-            painter,
-            Pos2::new(WINDOW_SIZE[0] * 0.5 + 200.0, legend_top),
-            "Thinking (thread color)",
-            Colors::reader_palette(0),
-        );
+        painter.rect_filled(legend_rect, 4.0, C_PANEL);
+        painter.rect_stroke(legend_rect, 4.0, Stroke::new(1.0, C_BORDER));
+        draw_legend(painter, Pos2::new(WINDOW_SIZE[0] * 0.5 - 230.0, legend_y), "Waiting", C_AMBER);
+        draw_legend(painter, Pos2::new(WINDOW_SIZE[0] * 0.5 - 80.0,  legend_y), "Reading", C_GREEN);
+        draw_legend(painter, Pos2::new(WINDOW_SIZE[0] * 0.5 + 60.0,  legend_y), "Writing", C_RED);
+        draw_legend(painter, Pos2::new(WINDOW_SIZE[0] * 0.5 + 210.0, legend_y), "Thinking", Colors::reader_palette(0).gamma_multiply(0.8));
+
+        // Screenshot overlay — shown while paused
+        let is_paused = self.runtime.as_ref().map(|r| r.is_paused()).unwrap_or(false);
+        if is_paused {
+            let banner_rect = Rect::from_center_size(
+                Pos2::new(WINDOW_SIZE[0] * 0.5, 62.0),
+                Vec2::new(340.0, 24.0),
+            );
+            painter.rect_filled(banner_rect, 6.0, Color32::from_rgb(37, 99, 235));
+            painter.text(
+                banner_rect.center(),
+                Align2::CENTER_CENTER,
+                "Paused — screenshot ready   (Space to resume)",
+                FontId::proportional(12.0),
+                Color32::WHITE,
+            );
+        }
     }
 }
 
 impl App for ReaderWriterApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(Duration::from_millis(16));
+        ctx.request_repaint_after(Duration::from_millis(33));
         let mut should_reset = false;
         let space_pressed = ctx.input(|input| input.key_pressed(egui::Key::Space));
+        let s_pressed    = ctx.input(|input| input.key_pressed(egui::Key::S));
+
+        // Receive screenshot from previous frame's request
+        let screenshot_image = ctx.input(|i| {
+            i.events.iter().find_map(|e| {
+                if let egui::Event::Screenshot { image, .. } = e {
+                    Some(std::sync::Arc::clone(image))
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(image) = screenshot_image {
+            if self.pending_screenshot {
+                self.pending_screenshot = false;
+                self.screenshot_counter += 1;
+                let path = format!("reader_writer{:02}.png", self.screenshot_counter);
+                save_screenshot(&image, &path);
+            }
+        }
+
+        if s_pressed {
+            if let Some(runtime) = self.runtime.as_ref() {
+                runtime.set_paused(true);
+            }
+            self.pending_screenshot = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        }
 
         if space_pressed && let Some(runtime) = self.runtime.as_ref() {
             let paused = runtime.is_paused();
@@ -583,6 +642,8 @@ impl App for ReaderWriterApp {
 
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.heading("Reader-Writer");
+                ui.separator();
                 let paused = self
                     .runtime
                     .as_ref()
@@ -598,14 +659,15 @@ impl App for ReaderWriterApp {
                     should_reset = true;
                 }
                 ui.separator();
-                ui.label(format!(
-                    "{} readers, {} writers, {}",
+                ui.label(egui::RichText::new(format!(
+                    "{} readers  \u{00b7}  {} writers  \u{00b7}  {}",
                     self.config.reader_count,
                     self.config.writer_count,
                     self.config.policy.label()
-                ));
-                ui.separator();
-                ui.label("Space: pause/resume");
+                )).color(C_TEXT_DIM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("S: screenshot  \u{00b7}  Space: pause/resume").color(C_TEXT_DIM));
+                });
             });
         });
 
@@ -1166,14 +1228,13 @@ fn reader_access_pos(id: usize) -> Pos2 {
 }
 
 fn draw_legend(painter: &egui::Painter, center: Pos2, label: &str, color: Color32) {
-    painter.circle_filled(center, 12.0, color);
-    painter.circle_stroke(center, 12.0, Stroke::new(1.5, Color32::BLACK));
+    painter.circle_filled(center, 7.0, color);
     painter.text(
-        center + Vec2::new(20.0, 0.0),
+        center + Vec2::new(13.0, 0.0),
         Align2::LEFT_CENTER,
         label,
-        FontId::proportional(15.0),
-        Color32::BLACK,
+        FontId::proportional(12.0),
+        C_TEXT_DIM,
     );
 }
 
@@ -1240,3 +1301,24 @@ impl SmallRng {
     }
 }
 
+fn save_screenshot(image: &egui::ColorImage, path: &str) {
+    let [width, height] = image.size;
+    let pixels: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+    let file = match std::fs::File::create(path) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("Screenshot: could not create '{path}': {e}"); return; }
+    };
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    match encoder.write_header() {
+        Ok(mut writer) => {
+            if let Err(e) = writer.write_image_data(&pixels) {
+                eprintln!("Screenshot: write failed for '{path}': {e}");
+            } else {
+                println!("Screenshot saved: {path}");
+            }
+        }
+        Err(e) => eprintln!("Screenshot: PNG header error for '{path}': {e}"),
+    }
+}

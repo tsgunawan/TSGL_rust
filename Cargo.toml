@@ -23,3 +23,6 @@ egui = "0.27"
 # For concurrency (most is std, but these help)
 parking_lot = "0.12"   # faster Mutex/RwLock than std
 crossbeam = "0.8"      # channels, better than std::sync::mpsc
+
+# For PNG screenshot saving
+png = "0.17"

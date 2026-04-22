@@ -15,6 +15,15 @@ const WINDOW_SIZE: [f32; 2] = [980.0, 760.0];
 const CAPACITY: usize = 8;
 const MAX_ACTORS: usize = 8;
 const START_STAGGER_MS: u64 = 110;
+
+// ── Light academic theme ──────────────────────────────────────────────────────
+const C_BG: Color32 = Color32::WHITE;
+const C_PANEL: Color32 = Color32::from_rgb(248, 249, 250);
+const C_BORDER: Color32 = Color32::from_rgb(222, 226, 230);
+const C_TEAL: Color32 = Color32::from_rgb(37, 99, 235);    // active / blue
+const C_AMBER: Color32 = Color32::from_rgb(234, 88, 12);   // waiting / orange
+const C_TEXT: Color32 = Color32::from_rgb(17, 24, 39);     // near-black
+const C_TEXT_DIM: Color32 = Color32::from_rgb(75, 85, 99); // secondary
 const THINK_MIN_MS: u64 = 600;
 const THINK_RANGE_MS: u64 = 1800;
 const ITEM_ANIMATION_MS: u64 = 700;
@@ -262,15 +271,20 @@ struct ProducerConsumerApp {
     config: ProducerConsumerConfig,
     shared: Arc<RwLock<AppState>>,
     runtime: Option<Runtime>,
+    screenshot_counter: u32,
+    pending_screenshot: bool,
 }
 
 impl ProducerConsumerApp {
-    fn new(_cc: &CreationContext<'_>, config: ProducerConsumerConfig) -> Self {
+    fn new(cc: &CreationContext<'_>, config: ProducerConsumerConfig) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::light());
         let (shared, runtime) = Self::build_runtime(&config);
         Self {
             config,
             shared,
             runtime: Some(runtime),
+            screenshot_counter: 0,
+            pending_screenshot: false,
         }
     }
 
@@ -297,28 +311,29 @@ impl ProducerConsumerApp {
     fn draw_scene(&self, ui: &mut egui::Ui) {
         let painter = ui.painter();
         let app = self.shared.read();
-        painter.rect_filled(ui.max_rect(), 0.0, Color32::from_rgb(249, 249, 246));
+
+        painter.rect_filled(ui.max_rect(), 0.0, C_BG);
 
         painter.text(
             Pos2::new(WINDOW_SIZE[0] * 0.5, 44.0),
             Align2::CENTER_CENTER,
             "Producer-Consumer",
-            FontId::proportional(30.0),
-            Color32::BLACK,
+            FontId::proportional(18.0),
+            C_TEXT,
         );
         painter.text(
-            Pos2::new(PRODUCER_X, 72.0),
+            Pos2::new(PRODUCER_X, 85.0),
             Align2::CENTER_CENTER,
             "Producers",
-            FontId::proportional(24.0),
-            Color32::BLACK,
+            FontId::proportional(14.0),
+            C_TEXT_DIM,
         );
         painter.text(
-            Pos2::new(CONSUMER_X, 72.0),
+            Pos2::new(CONSUMER_X, 85.0),
             Align2::CENTER_CENTER,
             "Consumers",
-            FontId::proportional(24.0),
-            Color32::BLACK,
+            FontId::proportional(14.0),
+            C_TEXT_DIM,
         );
 
         draw_queue_frame(painter);
@@ -346,7 +361,7 @@ impl ProducerConsumerApp {
                 9.0,
                 5,
                 item.color,
-                Stroke::new(1.5, Color32::BLACK),
+                Stroke::new(1.5, C_TEAL),
             );
         }
 
@@ -357,34 +372,108 @@ impl ProducerConsumerApp {
             draw_actor(painter, actor, consumer_center(actor.id), false);
         }
 
+        // Stats panel
+        let stats_rect = Rect::from_min_size(
+            Pos2::new(QUEUE_CENTER_X - 260.0, 462.0),
+            Vec2::new(520.0, 28.0),
+        );
+        painter.rect_filled(stats_rect, 6.0, C_PANEL);
+        painter.rect_stroke(stats_rect, 6.0, Stroke::new(1.0, C_BORDER));
         painter.text(
-            Pos2::new(WINDOW_SIZE[0] * 0.5, 470.0),
+            Pos2::new(QUEUE_CENTER_X, 476.0),
             Align2::CENTER_CENTER,
             format!(
-                "Queue count: {}   Waiting producers: {}   Waiting consumers: {}",
+                "Queue: {}   Waiting producers: {}   Waiting consumers: {}",
                 app.queue_stats.count, app.queue_stats.waiting_producers, app.queue_stats.waiting_consumers
             ),
-            FontId::proportional(18.0),
-            Color32::from_rgb(40, 40, 40),
+            FontId::monospace(12.0),
+            C_TEXT,
+        );
+
+        // Buffer fill bar
+        let bar_top = 500.0;
+        let bar_w = 320.0;
+        let bar_h = 10.0;
+        let bar_left = QUEUE_CENTER_X - bar_w / 2.0;
+        let bg_rect = Rect::from_min_size(Pos2::new(bar_left, bar_top), Vec2::new(bar_w, bar_h));
+        painter.rect_filled(bg_rect, 4.0, C_PANEL);
+        painter.rect_stroke(bg_rect, 4.0, Stroke::new(1.0, C_BORDER));
+        let fill_frac = app.queue_stats.count as f32 / CAPACITY as f32;
+        if fill_frac > 0.0 {
+            let fill_color = if fill_frac > 0.85 { C_AMBER } else { C_TEAL };
+            let fill_rect = Rect::from_min_size(Pos2::new(bar_left, bar_top), Vec2::new(bar_w * fill_frac, bar_h));
+            painter.rect_filled(fill_rect, 4.0, fill_color);
+        }
+        painter.text(
+            Pos2::new(QUEUE_CENTER_X, bar_top + bar_h + 14.0),
+            Align2::CENTER_CENTER,
+            format!("Buffer fill: {}/{}", app.queue_stats.count, CAPACITY),
+            FontId::proportional(12.0),
+            C_TEXT_DIM,
         );
 
         painter.text(
             Pos2::new(WINDOW_SIZE[0] * 0.5, WINDOW_SIZE[1] - 36.0),
             Align2::CENTER_CENTER,
-            "*Numbers indicate counts of items produced and consumed",
-            FontId::proportional(15.0),
-            Color32::from_rgb(55, 55, 55),
+            "Numbers indicate counts of items produced / consumed",
+            FontId::proportional(13.0),
+            C_TEXT_DIM,
         );
 
         draw_legend(painter);
+
+        // Screenshot overlay — shown while paused
+        let is_paused = self.runtime.as_ref().map(|r| r.is_paused()).unwrap_or(false);
+        if is_paused {
+            let banner_rect = Rect::from_center_size(
+                Pos2::new(WINDOW_SIZE[0] * 0.5, 62.0),
+                Vec2::new(340.0, 24.0),
+            );
+            painter.rect_filled(banner_rect, 6.0, Color32::from_rgb(37, 99, 235));
+            painter.text(
+                banner_rect.center(),
+                Align2::CENTER_CENTER,
+                "Paused — screenshot ready   (Space to resume)",
+                FontId::proportional(12.0),
+                Color32::WHITE,
+            );
+        }
     }
 }
 
 impl App for ProducerConsumerApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(Duration::from_millis(16));
+        ctx.request_repaint_after(Duration::from_millis(33));
         let mut should_reset = false;
         let space_pressed = ctx.input(|input| input.key_pressed(egui::Key::Space));
+        let s_pressed    = ctx.input(|input| input.key_pressed(egui::Key::S));
+
+        // Receive screenshot from previous frame's request
+        let screenshot_image = ctx.input(|i| {
+            i.events.iter().find_map(|e| {
+                if let egui::Event::Screenshot { image, .. } = e {
+                    Some(std::sync::Arc::clone(image))
+                } else {
+                    None
+                }
+            })
+        });
+        if let Some(image) = screenshot_image {
+            if self.pending_screenshot {
+                self.pending_screenshot = false;
+                self.screenshot_counter += 1;
+                let path = format!("producer_consumer{:02}.png", self.screenshot_counter);
+                save_screenshot(&image, &path);
+            }
+        }
+
+        if s_pressed {
+            if let Some(runtime) = self.runtime.as_ref() {
+                runtime.set_paused(true);
+            }
+            self.pending_screenshot = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+        }
 
         if space_pressed && let Some(runtime) = self.runtime.as_ref() {
             let paused = runtime.is_paused();
@@ -393,6 +482,8 @@ impl App for ProducerConsumerApp {
 
         egui::TopBottomPanel::top("controls").show(ctx, |ui| {
             ui.horizontal(|ui| {
+                ui.heading("Producer-Consumer");
+                ui.separator();
                 let paused = self
                     .runtime
                     .as_ref()
@@ -408,12 +499,13 @@ impl App for ProducerConsumerApp {
                     should_reset = true;
                 }
                 ui.separator();
-                ui.label(format!(
-                    "{} producers, {} consumers",
+                ui.label(egui::RichText::new(format!(
+                    "{} producers  \u{00b7}  {} consumers",
                     self.config.producer_count, self.config.consumer_count
-                ));
-                ui.separator();
-                ui.label("Space: pause/resume");
+                )).color(C_TEXT_DIM));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(egui::RichText::new("S: screenshot  \u{00b7}  Space: pause/resume").color(C_TEXT_DIM));
+                });
             });
         });
 
@@ -890,17 +982,30 @@ fn queue_slot_center(slot_idx: usize) -> Pos2 {
 }
 
 fn draw_queue_frame(painter: &egui::Painter) {
+    // Outer ring — light panel fill
+    painter.circle_filled(
+        Pos2::new(QUEUE_CENTER_X, QUEUE_CENTER_Y),
+        OUTER_RADIUS,
+        Color32::from_rgb(232, 234, 240),
+    );
     painter.circle_stroke(
         Pos2::new(QUEUE_CENTER_X, QUEUE_CENTER_Y),
         OUTER_RADIUS,
-        Stroke::new(2.0, Color32::BLACK),
+        Stroke::new(1.5, C_BORDER),
+    );
+    // Inner hub — white background
+    painter.circle_filled(
+        Pos2::new(QUEUE_CENTER_X, QUEUE_CENTER_Y),
+        INNER_RADIUS,
+        Color32::WHITE,
     );
     painter.circle_stroke(
         Pos2::new(QUEUE_CENTER_X, QUEUE_CENTER_Y),
         INNER_RADIUS,
-        Stroke::new(2.0, Color32::BLACK),
+        Stroke::new(1.0, C_BORDER),
     );
 
+    // Divider lines between slots — visible separators
     for idx in 0..CAPACITY {
         let angle = (idx as f32 * TAU) / CAPACITY as f32;
         let inner = Pos2::new(
@@ -911,115 +1016,96 @@ fn draw_queue_frame(painter: &egui::Painter) {
             QUEUE_CENTER_X - OUTER_RADIUS * angle.sin(),
             QUEUE_CENTER_Y + OUTER_RADIUS * angle.cos(),
         );
-        painter.line_segment([inner, outer], Stroke::new(1.5, Color32::BLACK));
+        painter.line_segment([inner, outer], Stroke::new(1.5, Color32::from_rgb(150, 155, 168)));
+    }
+
+    // Slot index labels (1–8) at the midpoint of each wedge
+    let label_radius = (INNER_RADIUS + OUTER_RADIUS) * 0.5;
+    for idx in 0..CAPACITY {
+        let mid_angle = (idx as f32 + 0.5) * TAU / CAPACITY as f32;
+        let pos = Pos2::new(
+            QUEUE_CENTER_X - label_radius * mid_angle.sin(),
+            QUEUE_CENTER_Y + label_radius * mid_angle.cos(),
+        );
+        painter.text(
+            pos,
+            Align2::CENTER_CENTER,
+            (idx + 1).to_string(),
+            FontId::proportional(12.0),
+            Color32::from_rgb(150, 155, 168),
+        );
     }
 }
 
 fn draw_actor(painter: &egui::Painter, actor: &ActorVisual, center: Pos2, circle: bool) {
-    let fill = match actor.state {
-        ActorState::ActiveColor => actor.color,
-        ActorState::Waiting => Color32::BLACK,
-        ActorState::HoldingLock => Color32::WHITE,
-        ActorState::Stopped => actor.color,
+    let (fill, stroke_col) = match actor.state {
+        ActorState::ActiveColor => (actor.color, actor.color),
+        ActorState::Waiting => (C_AMBER, C_AMBER),
+        ActorState::HoldingLock => (C_TEAL, C_TEAL),
+        ActorState::Stopped => (Color32::from_rgb(60, 60, 75), C_BORDER),
     };
 
     if circle {
         painter.circle_filled(center, 19.0, fill);
-        painter.circle_stroke(center, 19.0, Stroke::new(2.0, Color32::BLACK));
+        painter.circle_stroke(center, 19.0, Stroke::new(2.0, stroke_col));
     } else {
         let rect = Rect::from_center_size(center, Vec2::new(38.0, 38.0));
-        painter.rect_filled(rect, 2.0, fill);
-        painter.rect_stroke(rect, 2.0, Stroke::new(2.0, Color32::BLACK));
+        painter.rect_filled(rect, 8.0, fill);
+        painter.rect_stroke(rect, 8.0, Stroke::new(2.0, stroke_col));
     }
 
-    let text_color = if fill == Color32::BLACK {
-        Color32::WHITE
-    } else {
-        Color32::BLACK
-    };
     painter.text(
         center,
         Align2::CENTER_CENTER,
         actor.count.to_string(),
-        FontId::proportional(16.0),
-        text_color,
+        FontId::monospace(13.0),
+        Color32::WHITE,
     );
 
-    let label_offset = if circle { -44.0 } else { 52.0 };
-    let label_anchor = if circle {
-        Align2::RIGHT_CENTER
-    } else {
-        Align2::LEFT_CENTER
-    };
+    let label_offset = if circle { -46.0 } else { 50.0 };
+    let label_anchor = if circle { Align2::RIGHT_CENTER } else { Align2::LEFT_CENTER };
     painter.text(
         center + Vec2::new(label_offset, 0.0),
         label_anchor,
         format!("{} {}", actor.kind.label(), actor.id + 1),
-        FontId::proportional(15.0),
-        Color32::BLACK,
+        FontId::proportional(13.0),
+        C_TEXT,
     );
+
+    let state_color = match actor.state {
+        ActorState::Waiting => C_AMBER,
+        ActorState::HoldingLock => C_TEAL,
+        _ => C_TEXT_DIM,
+    };
     painter.text(
         center + Vec2::new(0.0, 28.0),
         Align2::CENTER_CENTER,
         actor.state.label(actor.kind),
-        FontId::proportional(13.0),
-        Color32::from_rgb(70, 70, 70),
+        FontId::proportional(12.0),
+        state_color,
     );
 }
 
 fn draw_legend(painter: &egui::Painter) {
     let top = 545.0;
-    painter.text(
-        Pos2::new(WINDOW_SIZE[0] * 0.5, top - 30.0),
-        Align2::CENTER_CENTER,
-        "Legend",
-        FontId::proportional(22.0),
-        Color32::BLACK,
-    );
 
-    draw_legend_actor(
-        painter,
-        Pos2::new(180.0, top),
-        true,
-        Colors::producer_palette(0),
-        "producing",
-    );
-    draw_legend_actor(
-        painter,
-        Pos2::new(180.0, top + 60.0),
-        true,
-        Color32::BLACK,
-        "waiting for lock",
-    );
-    draw_legend_actor(
-        painter,
-        Pos2::new(180.0, top + 120.0),
-        true,
-        Color32::WHITE,
-        "holding lock",
-    );
+    // Producer legend panel
+    let panel_p = Rect::from_min_size(Pos2::new(120.0, top - 16.0), Vec2::new(210.0, 110.0));
+    painter.rect_filled(panel_p, 8.0, C_PANEL);
+    painter.rect_stroke(panel_p, 8.0, Stroke::new(1.0, C_BORDER));
+    painter.text(Pos2::new(225.0, top), Align2::CENTER_CENTER, "Producers", FontId::proportional(13.0), C_TEXT_DIM);
+    draw_legend_actor(painter, Pos2::new(158.0, top + 22.0), true, Colors::producer_palette(0), "producing");
+    draw_legend_actor(painter, Pos2::new(158.0, top + 50.0), true, C_AMBER, "waiting for lock");
+    draw_legend_actor(painter, Pos2::new(158.0, top + 78.0), true, C_TEAL, "holding lock");
 
-    draw_legend_actor(
-        painter,
-        Pos2::new(560.0, top),
-        false,
-        Colors::consumer_palette(0),
-        "consuming",
-    );
-    draw_legend_actor(
-        painter,
-        Pos2::new(560.0, top + 60.0),
-        false,
-        Color32::BLACK,
-        "waiting for lock",
-    );
-    draw_legend_actor(
-        painter,
-        Pos2::new(560.0, top + 120.0),
-        false,
-        Color32::WHITE,
-        "holding lock",
-    );
+    // Consumer legend panel
+    let panel_c = Rect::from_min_size(Pos2::new(650.0, top - 16.0), Vec2::new(210.0, 110.0));
+    painter.rect_filled(panel_c, 8.0, C_PANEL);
+    painter.rect_stroke(panel_c, 8.0, Stroke::new(1.0, C_BORDER));
+    painter.text(Pos2::new(755.0, top), Align2::CENTER_CENTER, "Consumers", FontId::proportional(13.0), C_TEXT_DIM);
+    draw_legend_actor(painter, Pos2::new(688.0, top + 22.0), false, Colors::consumer_palette(0), "consuming");
+    draw_legend_actor(painter, Pos2::new(688.0, top + 50.0), false, C_AMBER, "waiting for lock");
+    draw_legend_actor(painter, Pos2::new(688.0, top + 78.0), false, C_TEAL, "holding lock");
 }
 
 fn draw_legend_actor(
@@ -1030,19 +1116,17 @@ fn draw_legend_actor(
     label: &str,
 ) {
     if circle {
-        painter.circle_filled(center, 18.0, fill);
-        painter.circle_stroke(center, 18.0, Stroke::new(1.5, Color32::BLACK));
+        painter.circle_filled(center, 11.0, fill);
     } else {
-        let rect = Rect::from_center_size(center, Vec2::new(36.0, 36.0));
-        painter.rect_filled(rect, 2.0, fill);
-        painter.rect_stroke(rect, 2.0, Stroke::new(1.5, Color32::BLACK));
+        let rect = Rect::from_center_size(center, Vec2::new(22.0, 22.0));
+        painter.rect_filled(rect, 4.0, fill);
     }
     painter.text(
-        center + Vec2::new(54.0, 0.0),
+        center + Vec2::new(20.0, 0.0),
         Align2::LEFT_CENTER,
         label,
-        FontId::proportional(18.0),
-        Color32::BLACK,
+        FontId::proportional(12.0),
+        C_TEXT_DIM,
     );
 }
 
@@ -1111,5 +1195,27 @@ impl SmallRng {
 
     fn next_f32(&mut self) -> f32 {
         (self.next_u64() as f64 / u64::MAX as f64) as f32
+    }
+}
+
+fn save_screenshot(image: &egui::ColorImage, path: &str) {
+    let [width, height] = image.size;
+    let pixels: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
+    let file = match std::fs::File::create(path) {
+        Ok(f) => f,
+        Err(e) => { eprintln!("Screenshot: could not create '{path}': {e}"); return; }
+    };
+    let mut encoder = png::Encoder::new(std::io::BufWriter::new(file), width as u32, height as u32);
+    encoder.set_color(png::ColorType::Rgba);
+    encoder.set_depth(png::BitDepth::Eight);
+    match encoder.write_header() {
+        Ok(mut writer) => {
+            if let Err(e) = writer.write_image_data(&pixels) {
+                eprintln!("Screenshot: write failed for '{path}': {e}");
+            } else {
+                println!("Screenshot saved: {path}");
+            }
+        }
+        Err(e) => eprintln!("Screenshot: PNG header error for '{path}': {e}"),
     }
 }

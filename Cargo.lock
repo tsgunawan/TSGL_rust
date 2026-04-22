@@ -10,6 +10,7 @@ dependencies = [
  "eframe",
  "egui",
  "parking_lot",
+ "png",
 ]
 
 [[package]]

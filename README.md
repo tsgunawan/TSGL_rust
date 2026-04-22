@@ -1,71 +1,64 @@
-# TSGL_rust
+# TSGL Rust
 
-Rust ports of the TSGL concurrency visualizations:
+Rust ports of the TSGL concurrency visualization demos, redesigned with a clean
+light theme suitable for academic publications (IEEE / ACM paper figures).
 
-- `ReaderWriter`
-- `ProducerConsumer`
-- `DiningPhilosophers`
+The original TSGL project is a C++ / OpenGL teaching library for parallel
+programming and synchronization demos. This repository reimplements the three
+core visualizations in Rust using **eframe / egui** for rendering and
+**std::thread** + **parking\_lot** for concurrency.
 
-The original TSGL project is a C++/OpenGL teaching library for parallel and synchronization demos. This repository reimplements the visualizations in Rust using:
+## Visualizations
 
-- `eframe` / `egui` for the UI
-- `std::thread` for worker threads
-- `parking_lot` synchronization primitives
-
-The Rust ports are structured so that simulation logic and UI rendering are separated:
-
-- worker threads update shared simulation state
-- the UI reads snapshots of that state and renders them
-- worker threads do not draw directly
+| Binary | Demonstrates |
+|---|---|
+| `reader_writer` | Reader–writer lock with reader-priority, writer-priority, and fair policies |
+| `producer_consumer` | Bounded-buffer producer–consumer with a circular 8-slot queue |
+| `dining_philosophers` | Dining philosophers with five deadlock-avoidance strategies |
 
 ## Author
 
-Prof. Dr. Teddy Surya Gunawan  
+**Prof. Dr. Teddy Surya Gunawan**  
 Electrical and Computer Engineering Department  
 International Islamic University Malaysia  
 tsgunawan@iium.edu.my
 
 ## Course Context
 
-This repository is prepared for Operating Systems class use.
+Prepared for Operating Systems class use.
 
 ## Acknowledgements
 
-This project is a Rust port of the TSGL concurrency visualizations.  
-Special thanks to the original authors of TSGL for their work and the original teaching visualizations.
+Rust port of the TSGL concurrency visualizations.  
+Special thanks to the original TSGL authors for their teaching visualizations.
+
+---
 
 ## Requirements
 
-- Rust toolchain
+- Rust toolchain (edition 2024, stable)
 - Cargo
 
 ## Build
 
 ```bash
-cargo check
+cargo build --release
 ```
 
 ## Run
 
-### ReaderWriter
+### Reader–Writer
 
 ```bash
 cargo run --bin reader_writer -- [numReaders] [numWriters] [policy] [starved]
 ```
 
-Arguments:
-
-- `numReaders`: number of reader threads, default `6`
-- `numWriters`: number of writer threads, default `6`
-- `policy`:
-  - `r` = reader priority
-  - `w` = writer priority
-  - omitted or anything else = fair
-- `starved`:
-  - `s` = starvation timing mode
-  - omitted or anything else = normal timing
-
-Examples:
+| Argument | Values | Default |
+|---|---|---|
+| `numReaders` | 1–9 | 6 |
+| `numWriters` | 1–9 | 6 |
+| `policy` | `r` reader-priority · `w` writer-priority · anything else fair | fair |
+| `starved` | `s` starvation timing · anything else normal | normal |
 
 ```bash
 cargo run --bin reader_writer -- 2 1
@@ -73,60 +66,35 @@ cargo run --bin reader_writer -- 6 6 r
 cargo run --bin reader_writer -- 6 6 w s
 ```
 
-Controls:
-
-- `Space` = pause / resume
-- `Reset` button = restart the simulation
-
-### ProducerConsumer
+### Producer–Consumer
 
 ```bash
 cargo run --bin producer_consumer -- [numProducers] [numConsumers]
 ```
 
-Arguments:
+| Argument | Values | Default |
+|---|---|---|
+| `numProducers` | 1–8 | 5 |
+| `numConsumers` | 1–8 | 5 |
 
-- `numProducers`: number of producers, default `5`
-- `numConsumers`: number of consumers, default `5`
-
-Behavior matches the original TSGL demo:
-
-- if either value is `<= 0`, both reset to `8`
-- if either value is `> 8`, both reset to `8`
-
-Examples:
+If either value is ≤ 0 or > 8, both are clamped to 8.
 
 ```bash
 cargo run --bin producer_consumer -- 2 1
 cargo run --bin producer_consumer -- 5 5
 ```
 
-Controls:
-
-- `Space` = pause / resume
-- `Reset` button = restart the simulation
-
-### DiningPhilosophers
+### Dining Philosophers
 
 ```bash
 cargo run --bin dining_philosophers -- [numPhilosophers] [speed|t|y] [method]
 ```
 
-Arguments:
-
-- `numPhilosophers`: number of philosophers, default `5`
-- `speed|t|y`:
-  - positive integer = animation speed
-  - `t` or `y` = step-through mode
-- `method`:
-  - `w` = wait when blocked
-  - `f` = forfeit when blocked
-  - `n` = n-count release
-  - `r` = resource hierarchy
-  - `o` = odd-even
-  - default = `o`
-
-Examples:
+| Argument | Values | Default |
+|---|---|---|
+| `numPhilosophers` | ≥ 2 | 5 |
+| `speed\|t\|y` | positive integer = speed · `t` or `y` = step-through | 5 |
+| `method` | `w` wait · `f` forfeit · `n` n-count · `r` hierarchy · `o` odd-even | `o` |
 
 ```bash
 cargo run --bin dining_philosophers -- 5 5 o
@@ -134,40 +102,131 @@ cargo run --bin dining_philosophers -- 7 10 r
 cargo run --bin dining_philosophers -- 5 t f
 ```
 
-Controls:
+---
 
-- normal mode: `Space` = pause / resume
-- step-through mode: `Space` = advance one step
-- `Reset` button = restart the simulation
+## Controls
 
-## Project Layout
+| Key / Button | Action |
+|---|---|
+| `Space` | Pause / resume (step-through mode: advance one step) |
+| `S` | **Freeze threads and save a PNG screenshot** |
+| `Reset` button | Stop all threads and restart the simulation |
 
-```text
-src/
-  reader_writer/
-    main.rs
-  producer_consumer/
-    main.rs
-  dining_philosophers/
-    main.rs
+### Screenshot feature
+
+Pressing `S` pauses the simulation and writes the current window contents to a
+PNG file in the working directory:
+
+```
+reader_writer01.png
+reader_writer02.png   ← counter increments on each press
+producer_consumer01.png
+dining_philosophers01.png
 ```
 
-Each binary is self-contained and can be run independently.
+A confirmation is printed to the terminal:
+
+```
+Screenshot saved: reader_writer01.png
+```
+
+Screenshots capture the window at its current state — threads may be mid-
+execution in a mix of reading, writing, waiting, and thinking states, which
+produces the most informative figure for a paper.  Press `Space` to resume
+after capturing.
+
+---
+
+## Visualization Design
+
+All three programs share a light academic color theme optimized for inclusion in
+IEEE / ACM conference and journal figures.
+
+### Color palette
+
+| State | Color | Hex |
+|---|---|---|
+| Active / running | Blue | `#2563eb` |
+| Waiting / blocked | Orange | `#ea580c` |
+| Eating / success | Green | `#16a34a` |
+| Idle / thinking | Gray | `#6b7280` |
+| Writing (reader–writer) | Red | `#dc2626` |
+| Background | White | `#ffffff` |
+| Panel background | Light gray | `#f8f9fa` |
+
+### Design choices
+
+- **Flat colors only** — no gradients, no transparency; renders cleanly in PDF
+  screenshots and grayscale print.
+- **Minimum font size 12 pt** — all labels remain legible when a figure is
+  scaled down to a single column width.
+- **30 fps repaint** — smooth enough for live demonstration, slow enough for
+  clean screenshots without motion artifacts.
+- **No pulse animations** — state transitions use solid color changes, not
+  sin-wave flicker, so any frame is a publication-ready still.
+
+### Per-visualization notes
+
+**Reader–Writer** — writers are highlighted with a flat red border around the
+data store while holding the lock; readers show a green active-reader badge.
+Thread circles move between home → waiting → access positions.
+
+**Producer–Consumer** — the 8-slot circular buffer is divided by visible radial
+lines with slot numbers 1–8; a fill-bar below shows buffer occupancy; animated
+stars travel from producers to the queue and from the queue to consumers.
+
+**Dining Philosophers** — philosophers sit around a light warm table; fork
+positions reflect ownership (pulled toward the holder); meal dots accumulate
+around each philosopher to show progress over time.
+
+---
+
+## Architecture
+
+Each binary is fully self-contained in `src/<name>/main.rs` with no shared
+library code between them.
+
+```
+src/
+  reader_writer/main.rs
+  producer_consumer/main.rs
+  dining_philosophers/main.rs
+```
+
+**Threading model (consistent across all three):**
+
+- Worker threads run simulation logic and update shared state via
+  `Arc<Mutex<…>>` or `Arc<RwLock<…>>` from `parking_lot`.
+- The `eframe` UI loop reads a snapshot of that state each frame and renders
+  it — workers never call drawing functions directly.
+- A shared `AtomicBool` coordinates pause / resume between threads and the UI.
+- On reset, all threads are signalled to stop, joined, then re-spawned with
+  fresh state.
+
+**Synchronization primitives:**
+
+| Primitive | Used for |
+|---|---|
+| `parking_lot::Mutex` + `Condvar` | Blocking workers on full/empty buffer or lock contention |
+| `parking_lot::RwLock` | Shared simulation snapshots read by the UI |
+| `std::sync::atomic::AtomicBool` | `running` / `paused` flags |
+| `std::sync::Barrier` | Philosopher thread startup sync (forfeit method) |
+
+---
 
 ## Known Differences From TSGL
 
-These Rust ports preserve the teaching goals and core synchronization behavior of the original TSGL demos, but they are not line-for-line translations.
+These ports preserve the teaching goals and synchronization behavior of the
+original TSGL demos but are not line-for-line translations.
 
-Notable differences:
+- Rendering uses **egui** instead of TSGL / OpenGL drawables.
+- Worker threads update shared state; the UI reads and renders snapshots.
+- Some visuals were adapted for immediate-mode UI rendering.
+- Cooperative shutdown replaces the original pthread / OpenMP rendering model.
 
-- Rendering is done with `egui` instead of TSGL/OpenGL drawables.
-- Worker threads do not draw directly; they only update shared simulation state.
-- Some visuals were adapted to fit immediate-mode UI rendering.
-- The Rust versions favor explicit shared state and cooperative shutdown instead of the original pthread/OpenMP rendering model.
-- In a few places, behavior was adjusted for clearer UI semantics while keeping the original demo intent.
+---
 
 ## License
 
-The original TSGL repository is licensed under GPL v3. Because this repository is a Rust port of those visualizations, `TSGL_rust` should be treated as GPL-compatible work as well unless you have a clean-room legal basis to license it differently.
-
-If you are publishing this repository, add a GPL v3 license file.
+The original TSGL repository is licensed under **GPL v3**. This repository, as
+a port of those visualizations, should be treated as GPL v3-compatible work.
