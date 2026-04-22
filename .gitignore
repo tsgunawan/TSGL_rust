@@ -10,9 +10,5 @@
 **/*.exe
 **/*.dll
 
-# Claude Code assistant files
-CLAUDE.md
-.claude/
-
 # Screenshots saved by the S key
 *.png

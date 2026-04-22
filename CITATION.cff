@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this repository, please cite the associated paper below."
+title: "TSGL-Rust"
+authors:
+  - family-names: "Gunawan"
+    given-names: "Teddy Surya"
+    affiliation: "International Islamic University Malaysia"
+    email: "tsgunawan@iium.edu.my"
+repository-code: "https://github.com/tsgunawan/TSGL_rust"
+license: "GPL-3.0-or-later"
+preferred-citation:
+  type: article
+  authors:
+    - family-names: "Gunawan"
+      given-names: "Teddy Surya"
+  title: "TSGL-Rust: Teaching Concurrency Through Compile-Time Enforcement via Rust-Based Visualization of Classical Synchronization Problems"
+  journal: "IIUM Engineering Journal"
+  volume: 27
+  issue: 2
+  year: 2026
+  doi: "10.31436/iiumej.v27i2.4361"
