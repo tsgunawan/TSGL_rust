@@ -3,6 +3,8 @@
 Rust ports of the TSGL concurrency visualization demos, redesigned with a clean
 light theme suitable for academic publications (IEEE / ACM paper figures).
 
+Repository: <https://github.com/tsgunawan/TSGL_rust>
+
 The original TSGL project is a C++ / OpenGL teaching library for parallel
 programming and synchronization demos. This repository reimplements the three
 core visualizations in Rust using **eframe / egui** for rendering and
@@ -31,6 +33,12 @@ Prepared for Operating Systems class use.
 
 Rust port of the TSGL concurrency visualizations.  
 Special thanks to the original TSGL authors for their teaching visualizations.
+
+## Citation
+
+If you use this repository, please cite:
+
+Teddy Surya Gunawan, "TSGL-Rust: Teaching Concurrency Through Compile-Time Enforcement via Rust-Based Visualization of Classical Synchronization Problems", *IIUM Engineering Journal*, Vol. 27, Issue 2, 2026. DOI: <https://doi.org/10.31436/iiumej.v27i2.4361>
 
 ---
 

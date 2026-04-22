@@ -2,6 +2,12 @@
 name = "TSGL_rust"
 version = "0.1.0"
 edition = "2024"
+authors = ["Prof. Dr. Teddy Surya Gunawan <tsgunawan@iium.edu.my>"]
+description = "Rust ports of TSGL concurrency visualization demos using eframe/egui."
+license = "GPL-3.0-or-later"
+readme = "README.md"
+repository = "https://github.com/tsgunawan/TSGL_rust"
+homepage = "https://github.com/tsgunawan/TSGL_rust"
 
 [[bin]]
 name = "reader_writer"
