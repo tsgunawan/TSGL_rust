@@ -38,7 +38,7 @@ Special thanks to the original TSGL authors for their teaching visualizations.
 
 If you use this repository, please cite:
 
-Teddy Surya Gunawan, "TSGL-Rust: Teaching Concurrency Through Compile-Time Enforcement via Rust-Based Visualization of Classical Synchronization Problems", *IIUM Engineering Journal*, Vol. 27, Issue 2, 2026. DOI: <https://doi.org/10.31436/iiumej.v27i2.4361>
+Teddy Surya Gunawan, "TSGL-Rust: Teaching Concurrency Through Compile-Time Enforcement via Rust-Based Visualization of Classical Synchronization Problems", *IIUM Engineering Journal*, Vol. 27, Issue 2, pp. 320-339, 2026. DOI: <https://doi.org/10.31436/iiumej.v27i2.4361>
 
 ---
 
